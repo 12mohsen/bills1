@@ -188,6 +188,42 @@ input, select, textarea, button { font-family: inherit; }
   background: var(--danger-bg); color: var(--danger);
   border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 600;
 }
+/* ===== GUEST BANNER ===== */
+.guest-banner {
+  background: linear-gradient(90deg, #7c3aed, #4f46e5);
+  color: #fff;
+  padding: 11px 20px;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  font-size: 13px; font-weight: 600;
+  position: sticky; top: 62px; z-index: 90;
+}
+.guest-banner-text { display: flex; align-items: center; gap: 8px; }
+.guest-banner-actions { display: flex; gap: 8px; }
+.btn-ghost {
+  background: rgba(255,255,255,0.18); color: #fff;
+  border: 1.5px solid rgba(255,255,255,0.4);
+  padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.2s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.3); }
+/* زر تصفح في شاشة الدخول */
+.btn-browse {
+  width: 100%; margin-top: 12px;
+  background: transparent; border: 1.5px solid var(--border);
+  color: var(--text2); border-radius: var(--radius2);
+  padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-browse:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+/* overlay على العناصر المعطّلة في وضع الضيف */
+.guest-locked { position: relative; pointer-events: none; opacity: 0.45; user-select: none; }
+.guest-locked::after {
+  content: '🔒';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; background: rgba(0,0,0,0.04); border-radius: var(--radius);
+  pointer-events: all; cursor: pointer;
+}
 @media (max-width: 600px) {
   .stats-row { grid-template-columns: 1fr 1fr; }
   .form-row { grid-template-columns: 1fr; }
@@ -236,6 +272,7 @@ input, select, textarea, button { font-family: inherit; }
         <label for="stay-logged" style="font-size:14px;font-weight:600;color:var(--text2);cursor:pointer;user-select:none">البقاء متصلاً</label>
       </div>
       <button class="btn btn-primary" onclick="doLogin()">دخول</button>
+      <button class="btn-browse" onclick="enterGuestMode()">👀 تصفح التطبيق بدون تسجيل</button>
     </div>
 
     <!-- REGISTER -->
@@ -265,14 +302,27 @@ input, select, textarea, button { font-family: inherit; }
 
 <!-- ===== APP SCREEN ===== -->
 <div id="app-screen">
+  <!-- بانر وضع الضيف -->
+  <div id="guest-banner" class="guest-banner" style="display:none">
+    <div class="guest-banner-text">
+      <span>🔒</span>
+      <span>أنت تتصفح كضيف — سجّل حساباً مجانياً للاستفادة من حفظ الفواتير وتتبع الضمان وجميع المميزات</span>
+    </div>
+    <div class="guest-banner-actions">
+      <button class="btn-ghost" onclick="goToRegister()">✨ إنشاء حساب</button>
+      <button class="btn-ghost" onclick="goToLogin()">دخول</button>
+    </div>
+  </div>
   <div class="header">
     <div class="header-brand">
       <span>🧾</span><span>فواتير الشراء</span>
     </div>
     <div class="header-actions">
-      <div class="user-chip"><span>👤</span><span id="header-username"></span></div>
-      <button class="icon-btn" title="الإعدادات" onclick="openSettings()">⚙️</button>
-      <button class="icon-btn" title="تسجيل الخروج" onclick="doLogout()">🚪</button>
+      <div class="user-chip"><span id="header-user-icon">👤</span><span id="header-username"></span></div>
+      <button class="icon-btn" title="مشاركة التطبيق" onclick="openShareModal()">🔗</button>
+      <button class="icon-btn" id="btn-settings" title="الإعدادات" onclick="openSettings()">⚙️</button>
+      <button class="icon-btn" id="btn-logout" title="تسجيل الخروج" onclick="doLogout()">🚪</button>
+      <button class="icon-btn" id="btn-guest-login" title="تسجيل الدخول" onclick="goToLogin()" style="display:none;background:rgba(255,255,255,0.3)">🔑</button>
     </div>
   </div>
 
@@ -518,6 +568,54 @@ input, select, textarea, button { font-family: inherit; }
   <img id="lightbox-img" src="" alt="">
 </div>
 
+<!-- ===== SHARE MODAL ===== -->
+<div class="modal-overlay" id="share-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <div class="modal-title">🔗 مشاركة التطبيق</div>
+      <button class="icon-btn" style="background:var(--bg3);color:var(--text)" onclick="closeModal('share-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
+
+      <!-- Web App -->
+      <div style="background:var(--bg3);border-radius:var(--radius2);padding:16px">
+        <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:10px">🌐 رابط التطبيق على الويب</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--accent);word-break:break-all;direction:ltr;text-align:left">
+            https://bills1.netlify.app/
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="copyLink('https://bills1.netlify.app/')">📋 نسخ</button>
+        </div>
+        <button class="btn btn-primary" style="margin-top:10px;width:100%" onclick="window.open('https://bills1.netlify.app/','_blank')">
+          🌐 فتح في المتصفح
+        </button>
+      </div>
+
+      <!-- APK -->
+      <div style="background:var(--success-bg);border:1px solid var(--success);border-radius:var(--radius2);padding:16px">
+        <div style="font-size:13px;font-weight:700;color:var(--success);margin-bottom:4px">📱 تطبيق الأندرويد (APK)</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px">حمّل التطبيق مباشرة على جهازك الأندرويد</div>
+        <button class="btn btn-success" style="width:100%" onclick="window.open('https://www.appcreator24.com/app4064395-gr2cv1','_blank')">
+          ⬇️ تحميل تطبيق الأندرويد
+        </button>
+      </div>
+
+      <!-- Share buttons -->
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" style="flex:1;font-size:13px"
+          onclick="window.open('https://wa.me/?text='+encodeURIComponent('🧾 نظام فواتير الشراء - إدارة فواتيرك وتتبع الضمان بسهولة\n\n🌐 الويب: https://bills1.netlify.app/\n📱 أندرويد: https://www.appcreator24.com/app4064395-gr2cv1'),'_blank')">
+          💬 واتساب
+        </button>
+        <button class="btn btn-secondary" style="flex:1;font-size:13px"
+          onclick="navigator.share ? navigator.share({title:'نظام فواتير الشراء',url:'https://bills1.netlify.app/'}) : copyLink('https://bills1.netlify.app/')">
+          ↗️ مشاركة
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <!-- ===== CONFIRM DIALOG ===== -->
 <div class="modal-overlay" id="confirm-modal">
   <div class="modal" style="max-width:380px">
@@ -621,6 +719,7 @@ function hideLoading() {
 // STATE
 // ============================================================
 let currentUser = null;
+let isGuest     = false;
 let cachedInvoices = [];
 let cachedTrash    = [];
 let selectedIds    = new Set();
@@ -632,6 +731,68 @@ function getSavedTheme() { return localStorage.getItem('wms_theme') || 'light'; 
 // ============================================================
 // AUTH
 // ============================================================
+// ============================================================
+// GUEST MODE
+// ============================================================
+function enterGuestMode() {
+  isGuest = true;
+  currentUser = null;
+  cachedInvoices = [];
+  cachedTrash = [];
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  document.getElementById('guest-banner').style.display = 'flex';
+  document.getElementById('header-username').textContent = 'ضيف';
+  document.getElementById('header-user-icon').textContent = '👀';
+  document.getElementById('btn-settings').style.display = 'none';
+  document.getElementById('btn-logout').style.display = 'none';
+  document.getElementById('btn-guest-login').style.display = 'flex';
+  setTheme(getSavedTheme(), false);
+  document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+  // قفل قسم الإضافة بصريًا
+  document.getElementById('add-section').classList.add('guest-locked');
+  document.getElementById('add-section').onclick = promptGuestLogin;
+  renderInvoices();
+  updateStats();
+}
+
+function promptGuestLogin() {
+  confirmDialog(
+    '🔒 هذه الميزة تتطلب حساباً',
+    'سجّل حساباً مجانياً للاستفادة من:\n• حفظ الفواتير وتتبع الضمان\n• رفع صور الفواتير\n• الوصول من أي جهاز',
+    '✨ إنشاء حساب مجاني', 'تصفح فقط'
+  ).then(ok => { if (ok) goToRegister(); });
+}
+
+function goToLogin() {
+  isGuest = false;
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('guest-banner').style.display = 'none';
+  document.getElementById('add-section').classList.remove('guest-locked');
+  document.getElementById('add-section').onclick = null;
+  switchAuthTab('login');
+  restoreHeaderButtons();
+}
+
+function goToRegister() {
+  isGuest = false;
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('guest-banner').style.display = 'none';
+  document.getElementById('add-section').classList.remove('guest-locked');
+  document.getElementById('add-section').onclick = null;
+  switchAuthTab('register');
+  restoreHeaderButtons();
+}
+
+function restoreHeaderButtons() {
+  document.getElementById('btn-settings').style.display = '';
+  document.getElementById('btn-logout').style.display = '';
+  document.getElementById('btn-guest-login').style.display = 'none';
+  document.getElementById('header-user-icon').textContent = '👤';
+}
+
 function switchAuthTab(tab) {
   document.querySelectorAll('.auth-tab').forEach((t, i) => {
     t.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'));
@@ -732,11 +893,16 @@ function doLogout() {
   if (!confirm('هل تريد تسجيل الخروج؟')) return;
   localStorage.removeItem('wms_session');
   currentUser = null;
+  isGuest = false;
   cachedInvoices = [];
   cachedTrash    = [];
   selectedIds.clear();
   selectMode = false;
   editingImages = [];
+  document.getElementById('guest-banner').style.display = 'none';
+  document.getElementById('add-section').classList.remove('guest-locked');
+  document.getElementById('add-section').onclick = null;
+  restoreHeaderButtons();
   document.getElementById('app-screen').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
   resetForm();
@@ -835,6 +1001,7 @@ function removeImg(idx) {
 }
 
 async function saveInvoice() {
+  if (isGuest) { promptGuestLogin(); return; }
   const date     = document.getElementById('f-date').value;
   const supplier = document.getElementById('f-supplier').value.trim();
   const wy       = parseInt(document.getElementById('f-wy').value) || 0;
@@ -1373,6 +1540,14 @@ function closeCamera() {
 // ============================================================
 // UTILS
 // ============================================================
+function openShareModal() { openModal('share-modal'); }
+
+function copyLink(url) {
+  navigator.clipboard.writeText(url)
+    .then(() => toast('✅ تم نسخ الرابط', 'success'))
+    .catch(() => toast('تعذّر النسخ', 'error'));
+}
+
 // نافذة تأكيد مخصصة — تعيد Promise<boolean>
 function confirmDialog(title, msg, okLabel, cancelLabel) {
   return new Promise(resolve => {
