@@ -157,7 +157,7 @@ input, select, textarea, button { font-family: inherit; }
 .lightbox-btn:hover { background: rgba(255,255,255,0.38); }
 .lightbox-zoom-label { color: #fff; font-size: 13px; font-weight: 700; min-width: 46px; text-align: center; }
 .lightbox-img-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden; padding: 70px 20px 20px; cursor: zoom-out; }
-.lightbox img { border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); transition: transform 0.2s ease; max-width: 100%; max-height: 100%; cursor: default; transform-origin: center center; }
+.lightbox img { border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); transition: transform 0.15s ease; max-width: 100%; max-height: 100%; cursor: grab; transform-origin: center center; user-select: none; }
 .toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 400; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast { background: var(--card); border: 1px solid var(--border); border-radius: 30px; padding: 10px 22px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow2); display: flex; align-items: center; gap: 8px; animation: slideUp 0.3s ease, fadeOut 0.4s ease 2.6s forwards; white-space: nowrap; }
 .toast.success { border-color: var(--success); color: var(--success); }
@@ -568,6 +568,15 @@ input, select, textarea, button { font-family: inherit; }
 
 <!-- ===== IMAGE LIGHTBOX ===== -->
 <div class="lightbox" id="lightbox">
+  <!-- زر الإغلاق ثابت دائماً -->
+  <button onclick="closeLightbox()" title="إغلاق" style="
+    position:fixed; top:14px; left:14px; z-index:999;
+    width:52px; height:52px; border-radius:50%; border:none;
+    background:rgba(239,68,68,0.85); color:#fff; font-size:24px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.4);
+    touch-action:manipulation;
+  ">✕</button>
   <div class="lightbox-toolbar">
     <button class="lightbox-btn" onclick="zoomOut()" title="تصغير">➖</button>
     <span class="lightbox-zoom-label" id="lightbox-zoom-label">100%</span>
@@ -575,7 +584,6 @@ input, select, textarea, button { font-family: inherit; }
     <button class="lightbox-btn" onclick="resetZoom()" title="إعادة الحجم الأصلي" style="font-size:14px">⊡</button>
     <button class="lightbox-btn" onclick="shareImage()" title="مشاركة الصورة">↗️</button>
     <button class="lightbox-btn" onclick="saveImage()" title="حفظ الصورة">⬇️</button>
-    <button class="lightbox-btn" onclick="closeLightbox()" title="إغلاق">✕</button>
   </div>
   <div class="lightbox-img-wrap" id="lightbox-img-wrap" onclick="closeLightbox()">
     <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation()">
@@ -1743,9 +1751,59 @@ function _applyZoom() {
     }
   }, { passive: false });
 
+  let _lastTap = 0;
   document.addEventListener('touchend', function(e) {
     if (e.touches.length < 2) _pinching = false;
-    if (e.touches.length === 0) _dragging = false;
+    if (e.touches.length === 0) {
+      if (!_dragging && isOpen()) {
+        const now = Date.now();
+        if (now - _lastTap < 300) closeLightbox();
+        _lastTap = now;
+      }
+      _dragging = false;
+    }
+  });
+})();
+
+// ── Mouse wheel zoom + drag pan (desktop) ─────────────────
+(function() {
+  let _mDragging = false, _mLastX = 0, _mLastY = 0, _mStartTx = 0, _mStartTy = 0;
+
+  function isOpen() {
+    return document.getElementById('lightbox').classList.contains('open');
+  }
+
+  // Wheel zoom
+  document.getElementById('lightbox').addEventListener('wheel', function(e) {
+    if (!isOpen()) return;
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    _lbZoom = Math.min(Math.max(_lbZoom + delta, 0.25), 4);
+    _applyZoom();
+  }, { passive: false });
+
+  // Mouse drag
+  document.getElementById('lightbox').addEventListener('mousedown', function(e) {
+    if (!isOpen() || _lbZoom <= 1) return;
+    _mDragging = true;
+    _mLastX = e.clientX; _mLastY = e.clientY;
+    _mStartTx = _lbTx;   _mStartTy = _lbTy;
+    document.getElementById('lightbox-img').style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!_mDragging) return;
+    _lbTx = _mStartTx + (e.clientX - _mLastX);
+    _lbTy = _mStartTy + (e.clientY - _mLastY);
+    _applyZoom();
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (_mDragging) {
+      _mDragging = false;
+      document.getElementById('lightbox-img').style.cursor = 'default';
+    }
   });
 })();
 async function shareImage() {
@@ -1838,7 +1896,9 @@ function renderEditImagePreviews() {
   container.innerHTML = existingHtml + newHtml;
 }
 
-function removeEditExistingImg(idx) {
+async function removeEditExistingImg(idx) {
+  const go = await confirmDialog('🗑️ حذف الصورة', 'هل تريد حذف هذه الصورة؟\nسيتم حذفها نهائياً عند الحفظ.', 'حذف', 'إلغاء');
+  if (!go) return;
   const removed = editExistingImages.splice(idx, 1);
   if (removed[0]) removedEditImages.push(removed[0]);
   renderEditImagePreviews();
