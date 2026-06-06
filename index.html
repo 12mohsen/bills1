@@ -150,10 +150,14 @@ input, select, textarea, button { font-family: inherit; }
 .modal-title { font-size: 17px; font-weight: 700; }
 .modal-body { padding: 22px; }
 .modal-footer { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
-.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 300; display: none; align-items: center; justify-content: center; padding: 20px; }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 300; display: none; flex-direction: column; align-items: center; justify-content: center; }
 .lightbox.open { display: flex; }
-.lightbox img { max-width: 100%; max-height: 90vh; border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
-.lightbox-close { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.2); border: none; color: #fff; cursor: pointer; width: 42px; height: 42px; border-radius: 50%; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+.lightbox-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 16px; background: rgba(0,0,0,0.6); z-index: 10; flex-wrap: wrap; }
+.lightbox-btn { background: rgba(255,255,255,0.18); border: none; color: #fff; cursor: pointer; width: 42px; height: 42px; border-radius: 50%; font-size: 18px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink: 0; }
+.lightbox-btn:hover { background: rgba(255,255,255,0.38); }
+.lightbox-zoom-label { color: #fff; font-size: 13px; font-weight: 700; min-width: 46px; text-align: center; }
+.lightbox-img-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden; padding: 70px 20px 20px; cursor: zoom-out; }
+.lightbox img { border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); transition: transform 0.2s ease; max-width: 100%; max-height: 100%; cursor: default; transform-origin: center center; }
 .toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 400; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast { background: var(--card); border: 1px solid var(--border); border-radius: 30px; padding: 10px 22px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow2); display: flex; align-items: center; gap: 8px; animation: slideUp 0.3s ease, fadeOut 0.4s ease 2.6s forwards; white-space: nowrap; }
 .toast.success { border-color: var(--success); color: var(--success); }
@@ -401,7 +405,7 @@ input, select, textarea, button { font-family: inherit; }
               <span class="icon">🖼️</span>
               <p>اختيار صور</p>
             </label>
-            <div class="upload-btn-area" onclick="openCamera()" style="cursor:pointer">
+            <div class="upload-btn-area" onclick="camContext='add';openCamera()" style="cursor:pointer">
               <span class="icon">📸</span>
               <p>استخدام الكاميرا</p>
             </div>
@@ -563,9 +567,19 @@ input, select, textarea, button { font-family: inherit; }
 </div>
 
 <!-- ===== IMAGE LIGHTBOX ===== -->
-<div class="lightbox" id="lightbox" onclick="closeLightbox()">
-  <button class="lightbox-close">✕</button>
-  <img id="lightbox-img" src="" alt="">
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-toolbar">
+    <button class="lightbox-btn" onclick="zoomOut()" title="تصغير">➖</button>
+    <span class="lightbox-zoom-label" id="lightbox-zoom-label">100%</span>
+    <button class="lightbox-btn" onclick="zoomIn()" title="تكبير">➕</button>
+    <button class="lightbox-btn" onclick="resetZoom()" title="إعادة الحجم الأصلي" style="font-size:14px">⊡</button>
+    <button class="lightbox-btn" onclick="shareImage()" title="مشاركة الصورة">↗️</button>
+    <button class="lightbox-btn" onclick="saveImage()" title="حفظ الصورة">⬇️</button>
+    <button class="lightbox-btn" onclick="closeLightbox()" title="إغلاق">✕</button>
+  </div>
+  <div class="lightbox-img-wrap" id="lightbox-img-wrap" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation()">
+  </div>
 </div>
 
 <!-- ===== SHARE MODAL ===== -->
@@ -612,6 +626,77 @@ input, select, textarea, button { font-family: inherit; }
         </button>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- ===== EDIT INVOICE MODAL ===== -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل الفاتورة</div>
+      <button class="icon-btn" style="background:var(--bg3);color:var(--text)" onclick="closeModal('edit-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-id">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">📅 تاريخ الشراء</label>
+          <input class="form-input" id="edit-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🏪 اسم المورد</label>
+          <input class="form-input" id="edit-supplier" type="text" placeholder="اسم المتجر أو الشركة">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">🛡️ مدة الضمان</label>
+        <div class="form-row-3">
+          <div>
+            <input class="form-input" id="edit-wy" type="number" min="0" max="99" placeholder="0" oninput="calcEditExpiry()">
+            <p class="hint-text" style="text-align:center">سنة</p>
+          </div>
+          <div>
+            <input class="form-input" id="edit-wm" type="number" min="0" max="11" placeholder="0" oninput="calcEditExpiry()">
+            <p class="hint-text" style="text-align:center">شهر</p>
+          </div>
+          <div>
+            <input class="form-input" id="edit-wd" type="number" min="0" max="30" placeholder="0" oninput="calcEditExpiry()">
+            <p class="hint-text" style="text-align:center">يوم</p>
+          </div>
+        </div>
+        <div id="edit-expiry-display" class="warranty-calc" style="display:none"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">💰 المبلغ الإجمالي (ريال)</label>
+          <input class="form-input" id="edit-amount" type="number" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">📝 تفاصيل المشتريات</label>
+          <input class="form-input" id="edit-notes" type="text" placeholder="مثال: جهاز تلفاز...">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">📷 صور الفاتورة الحالية</label>
+        <div class="img-previews" id="edit-img-previews" style="margin-top:6px"></div>
+        <div class="img-upload-row" style="margin-top:8px">
+          <label class="upload-btn-area" for="edit-img-file">
+            <span class="icon">🖼️</span>
+            <p>إضافة صور جديدة</p>
+          </label>
+          <div class="upload-btn-area" onclick="openCameraForEdit()" style="cursor:pointer">
+            <span class="icon">📸</span>
+            <p>استخدام الكاميرا</p>
+          </div>
+        </div>
+        <input type="file" id="edit-img-file" accept="image/*" multiple style="display:none" onchange="handleEditImages(this)">
+        <div id="edit-upload-progress" class="img-upload-progress"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('edit-modal')" style="flex:1">إلغاء</button>
+      <button class="btn btn-primary" onclick="saveEditInvoice()" style="flex:1">💾 حفظ التعديلات</button>
     </div>
   </div>
 </div>
@@ -1163,6 +1248,7 @@ function renderInvoiceCard(inv) {
       </div>
       <div class="invoice-actions">
         <button class="btn btn-secondary btn-sm" onclick="showDetail(${inv.id})">👁️ عرض</button>
+        <button class="btn btn-secondary btn-sm" onclick="editInvoice(${inv.id})" style="background:var(--accent-bg);color:var(--accent)">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>
       </div>
     </div>
@@ -1449,9 +1535,15 @@ function dRow(label, val) {
 // ============================================================
 // CAMERA
 // ============================================================
-let camStream = null, camFacing = 'environment', camPhotoData = null;
+let camStream = null, camFacing = 'environment', camPhotoData = null, camContext = 'add';
+
+function openCameraForEdit() {
+  camContext = 'edit';
+  openCamera();
+}
 
 async function openCamera() {
+  camContext = camContext || 'add';
   camPhotoData = null;
   document.getElementById('cam-preview-wrap').style.display = 'none';
   document.getElementById('cam-capture-btn').style.display = '';
@@ -1518,8 +1610,14 @@ function retakePhoto() {
 
 function saveCameraPhoto() {
   if (!camPhotoData) return;
-  editingImages.push(camPhotoData);
-  renderImagePreviews();
+  if (camContext === 'edit') {
+    editingNewImages.push(camPhotoData);
+    renderEditImagePreviews();
+  } else {
+    editingImages.push(camPhotoData);
+    renderImagePreviews();
+  }
+  camContext = 'add';
   closeCamera();
   toast('تمت إضافة الصورة ✅', 'success');
 }
@@ -1575,11 +1673,45 @@ function toggleSection(id) {
 }
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+let _lbZoom = 1, _lbSrc = '';
 function openLightbox(src) {
-  document.getElementById('lightbox-img').src = src;
+  _lbSrc = src;
+  _lbZoom = 1;
+  const img = document.getElementById('lightbox-img');
+  img.src = src;
+  img.style.transform = 'scale(1)';
+  document.getElementById('lightbox-zoom-label').textContent = '100%';
   document.getElementById('lightbox').classList.add('open');
 }
-function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  _lbZoom = 1;
+}
+function zoomIn() { _lbZoom = Math.min(_lbZoom + 0.25, 4); _applyZoom(); }
+function zoomOut() { _lbZoom = Math.max(_lbZoom - 0.25, 0.25); _applyZoom(); }
+function resetZoom() { _lbZoom = 1; _applyZoom(); }
+function _applyZoom() {
+  document.getElementById('lightbox-img').style.transform = `scale(${_lbZoom})`;
+  document.getElementById('lightbox-zoom-label').textContent = Math.round(_lbZoom * 100) + '%';
+}
+async function shareImage() {
+  if (navigator.share) {
+    try { await navigator.share({ url: _lbSrc, title: 'صورة الفاتورة' }); } catch {}
+  } else {
+    navigator.clipboard.writeText(_lbSrc)
+      .then(() => toast('\u2705 تم نسخ رابط الصورة', 'success'))
+      .catch(() => toast('تعذّر النسخ', 'error'));
+  }
+}
+function saveImage() {
+  const a = document.createElement('a');
+  a.href = _lbSrc;
+  a.download = 'invoice-image.jpg';
+  a.target = '_blank';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 function formatDateAr(d) {
   return d.toLocaleDateString('ar-SA', { year: 'numeric', month: 'long', day: 'numeric' });
 }
@@ -1592,6 +1724,144 @@ function toast(msg, type = 'info') {
   t.textContent = msg;
   document.getElementById('toasts').appendChild(t);
   setTimeout(() => t.remove(), 3200);
+}
+
+// ============================================================
+// EDIT INVOICE
+// ============================================================
+let editingNewImages = []; // base64 new images to add
+let editExistingImages = []; // current image URLs
+
+function editInvoice(id) {
+  const inv = cachedInvoices.find(i => i.id === id);
+  if (!inv) return;
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-date').value = inv.date || '';
+  document.getElementById('edit-supplier').value = inv.supplier || '';
+  document.getElementById('edit-wy').value = inv.warranty_years || 0;
+  document.getElementById('edit-wm').value = inv.warranty_months || 0;
+  document.getElementById('edit-wd').value = inv.warranty_days || 0;
+  document.getElementById('edit-amount').value = inv.amount || '';
+  document.getElementById('edit-notes').value = inv.notes || '';
+  editExistingImages = [...(inv.images || [])];
+  editingNewImages = [];
+  renderEditImagePreviews();
+  calcEditExpiry();
+  openModal('edit-modal');
+}
+
+function calcEditExpiry() {
+  const dateVal = document.getElementById('edit-date').value;
+  const wy = parseInt(document.getElementById('edit-wy').value) || 0;
+  const wm = parseInt(document.getElementById('edit-wm').value) || 0;
+  const wd = parseInt(document.getElementById('edit-wd').value) || 0;
+  const el = document.getElementById('edit-expiry-display');
+  if (!dateVal || (wy === 0 && wm === 0 && wd === 0)) { el.style.display = 'none'; return; }
+  const d = new Date(dateVal);
+  d.setFullYear(d.getFullYear() + wy);
+  d.setMonth(d.getMonth() + wm);
+  d.setDate(d.getDate() + wd);
+  el.style.display = 'block';
+  el.textContent = '📅 تاريخ انتهاء الضمان: ' + formatDateAr(d);
+}
+
+function renderEditImagePreviews() {
+  const container = document.getElementById('edit-img-previews');
+  const existingHtml = editExistingImages.map((src, i) =>
+    `<div class="img-thumb">
+      <img src="${src}" alt="صورة">
+      <button class="del-img" onclick="removeEditExistingImg(${i})">✕</button>
+    </div>`
+  ).join('');
+  const newHtml = editingNewImages.map((src, i) =>
+    `<div class="img-thumb" style="border-color:var(--accent)">
+      <img src="${src}" alt="جديدة">
+      <button class="del-img" onclick="removeEditNewImg(${i})">✕</button>
+    </div>`
+  ).join('');
+  container.innerHTML = existingHtml + newHtml;
+}
+
+function removeEditExistingImg(idx) {
+  editExistingImages.splice(idx, 1);
+  renderEditImagePreviews();
+}
+function removeEditNewImg(idx) {
+  editingNewImages.splice(idx, 1);
+  renderEditImagePreviews();
+}
+
+function handleEditImages(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  let loaded = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      editingNewImages.push(e.target.result);
+      loaded++;
+      if (loaded === files.length) renderEditImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+async function saveEditInvoice() {
+  const id       = parseInt(document.getElementById('edit-id').value);
+  const date     = document.getElementById('edit-date').value;
+  const supplier = document.getElementById('edit-supplier').value.trim();
+  const wy       = parseInt(document.getElementById('edit-wy').value) || 0;
+  const wm       = parseInt(document.getElementById('edit-wm').value) || 0;
+  const wd       = parseInt(document.getElementById('edit-wd').value) || 0;
+  const amount   = parseFloat(document.getElementById('edit-amount').value) || 0;
+  const notes    = document.getElementById('edit-notes').value.trim();
+
+  if (!date)     { toast('يرجى تحديد تاريخ الشراء', 'error'); return; }
+  if (!supplier) { toast('يرجى إدخال اسم المورد', 'error'); return; }
+
+  let expiry_date = null;
+  if (wy > 0 || wm > 0 || wd > 0) {
+    const d = new Date(date);
+    d.setFullYear(d.getFullYear() + wy);
+    d.setMonth(d.getMonth() + wm);
+    d.setDate(d.getDate() + wd);
+    expiry_date = d.toISOString().split('T')[0];
+  }
+
+  // Upload new images
+  const allImages = [...editExistingImages];
+  if (editingNewImages.length > 0) {
+    const prog = document.getElementById('edit-upload-progress');
+    prog.style.display = 'block';
+    for (let i = 0; i < editingNewImages.length; i++) {
+      prog.textContent = `☁️ جارٍ رفع الصورة ${i+1} من ${editingNewImages.length}...`;
+      try {
+        const url = await uploadToCloudinary(editingNewImages[i]);
+        allImages.push(url);
+      } catch (e) {
+        toast(`فشل رفع الصورة ${i+1}: ${e.message}`, 'error');
+      }
+    }
+    prog.style.display = 'none';
+  }
+
+  showLoading('جارٍ حفظ التعديلات...');
+  try {
+    const updated = await sbPatch('wms_invoices', `id=eq.${id}`, {
+      date, supplier, amount, notes, expiry_date,
+      warranty_years: wy, warranty_months: wm, warranty_days: wd,
+      images: allImages
+    });
+    const idx = cachedInvoices.findIndex(i => i.id === id);
+    if (idx !== -1) cachedInvoices[idx] = { ...cachedInvoices[idx], ...updated[0] };
+    closeModal('edit-modal');
+    renderInvoices();
+    updateStats();
+    toast('تم حفظ التعديلات بنجاح ✅', 'success');
+  } catch (e) {
+    toast('خطأ في الحفظ: ' + e.message, 'error');
+  } finally { hideLoading(); }
 }
 
 // ============================================================
