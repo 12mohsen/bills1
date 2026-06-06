@@ -156,7 +156,7 @@ input, select, textarea, button { font-family: inherit; }
 .lightbox-btn { background: rgba(255,255,255,0.18); border: none; color: #fff; cursor: pointer; width: 42px; height: 42px; border-radius: 50%; font-size: 18px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink: 0; }
 .lightbox-btn:hover { background: rgba(255,255,255,0.38); }
 .lightbox-zoom-label { color: #fff; font-size: 13px; font-weight: 700; min-width: 46px; text-align: center; }
-.lightbox-img-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden; padding: 70px 20px 20px; cursor: zoom-out; }
+.lightbox-img-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden; padding: 70px 20px 80px; }
 .lightbox img { border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); transition: transform 0.15s ease; max-width: 100%; max-height: 100%; cursor: grab; transform-origin: center center; user-select: none; }
 .toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 400; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast { background: var(--card); border: 1px solid var(--border); border-radius: 30px; padding: 10px 22px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow2); display: flex; align-items: center; gap: 8px; animation: slideUp 0.3s ease, fadeOut 0.4s ease 2.6s forwards; white-space: nowrap; }
@@ -568,15 +568,7 @@ input, select, textarea, button { font-family: inherit; }
 
 <!-- ===== IMAGE LIGHTBOX ===== -->
 <div class="lightbox" id="lightbox">
-  <!-- زر الإغلاق ثابت دائماً -->
-  <button onclick="closeLightbox()" title="إغلاق" style="
-    position:fixed; top:14px; left:14px; z-index:999;
-    width:52px; height:52px; border-radius:50%; border:none;
-    background:rgba(239,68,68,0.85); color:#fff; font-size:24px;
-    display:flex; align-items:center; justify-content:center;
-    cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.4);
-    touch-action:manipulation;
-  ">✕</button>
+  <!-- شريط أدوات علوي: تكبير وتصغير -->
   <div class="lightbox-toolbar">
     <button class="lightbox-btn" onclick="zoomOut()" title="تصغير">➖</button>
     <span class="lightbox-zoom-label" id="lightbox-zoom-label">100%</span>
@@ -585,8 +577,18 @@ input, select, textarea, button { font-family: inherit; }
     <button class="lightbox-btn" onclick="shareImage()" title="مشاركة الصورة">↗️</button>
     <button class="lightbox-btn" onclick="saveImage()" title="حفظ الصورة">⬇️</button>
   </div>
-  <div class="lightbox-img-wrap" id="lightbox-img-wrap" onclick="closeLightbox()">
-    <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation()">
+  <!-- الصورة -->
+  <div class="lightbox-img-wrap" id="lightbox-img-wrap" onclick="if(event.target===this)resetZoom()">
+    <img id="lightbox-img" src="" alt="">
+  </div>
+  <!-- زر الإغلاق في الأسفل -->
+  <div style="position:fixed;bottom:0;left:0;right:0;z-index:999;display:flex;justify-content:center;padding:18px;background:linear-gradient(transparent,rgba(0,0,0,0.7))">
+    <button onclick="closeLightbox()" style="
+      padding:14px 52px; border-radius:50px; border:none;
+      background:rgba(239,68,68,0.9); color:#fff; font-size:18px; font-weight:700;
+      cursor:pointer; box-shadow:0 4px 20px rgba(0,0,0,0.5);
+      touch-action:manipulation; letter-spacing:1px;
+    ">✕ إغلاق</button>
   </div>
 </div>
 
@@ -1720,6 +1722,8 @@ function _applyZoom() {
 
   document.addEventListener('touchstart', function(e) {
     if (!isOpen()) return;
+    // تجاهل اللمس على الأزرار
+    if (e.target.closest('button')) return;
     if (e.touches.length === 2) {
       e.preventDefault();
       _pinching = true;
@@ -1785,6 +1789,7 @@ function _applyZoom() {
   // Mouse drag
   document.getElementById('lightbox').addEventListener('mousedown', function(e) {
     if (!isOpen() || _lbZoom <= 1) return;
+    if (e.target.closest('button')) return;
     _mDragging = true;
     _mLastX = e.clientX; _mLastY = e.clientY;
     _mStartTx = _lbTx;   _mStartTy = _lbTy;
