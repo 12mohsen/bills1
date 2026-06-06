@@ -541,7 +541,7 @@ input, select, textarea, button { font-family: inherit; }
 </div>
 
 <!-- ===== CAMERA MODAL ===== -->
-<div class="modal-overlay" id="camera-modal">
+<div class="modal-overlay" id="camera-modal" style="z-index:350">
   <div class="modal" style="max-width:520px">
     <div class="modal-header">
       <div class="modal-title">📸 التقاط صورة</div>
@@ -1694,6 +1694,39 @@ function _applyZoom() {
   document.getElementById('lightbox-img').style.transform = `scale(${_lbZoom})`;
   document.getElementById('lightbox-zoom-label').textContent = Math.round(_lbZoom * 100) + '%';
 }
+
+// ── Pinch-to-zoom ──────────────────────────────────────────
+(function() {
+  let _startDist = 0, _startZoom = 1, _pinching = false;
+
+  function getDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  document.addEventListener('touchstart', function(e) {
+    if (!document.getElementById('lightbox').classList.contains('open')) return;
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      _pinching = true;
+      _startDist = getDist(e.touches);
+      _startZoom = _lbZoom;
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', function(e) {
+    if (!_pinching || e.touches.length < 2) return;
+    e.preventDefault();
+    const newDist = getDist(e.touches);
+    _lbZoom = Math.min(Math.max(_startZoom * (newDist / _startDist), 0.25), 4);
+    _applyZoom();
+  }, { passive: false });
+
+  document.addEventListener('touchend', function(e) {
+    if (e.touches.length < 2) _pinching = false;
+  });
+})();
 async function shareImage() {
   if (navigator.share) {
     try { await navigator.share({ url: _lbSrc, title: 'صورة الفاتورة' }); } catch {}
