@@ -1785,6 +1785,7 @@ function toast(msg, type = 'info') {
 // ============================================================
 let editingNewImages = []; // base64 new images to add
 let editExistingImages = []; // current image URLs
+let removedEditImages = []; // URLs removed by user → will be deleted from Cloudinary
 
 function editInvoice(id) {
   const inv = cachedInvoices.find(i => i.id === id);
@@ -1799,6 +1800,7 @@ function editInvoice(id) {
   document.getElementById('edit-notes').value = inv.notes || '';
   editExistingImages = [...(inv.images || [])];
   editingNewImages = [];
+  removedEditImages = [];
   renderEditImagePreviews();
   calcEditExpiry();
   openModal('edit-modal');
@@ -1837,7 +1839,8 @@ function renderEditImagePreviews() {
 }
 
 function removeEditExistingImg(idx) {
-  editExistingImages.splice(idx, 1);
+  const removed = editExistingImages.splice(idx, 1);
+  if (removed[0]) removedEditImages.push(removed[0]);
   renderEditImagePreviews();
 }
 function removeEditNewImg(idx) {
@@ -1909,6 +1912,11 @@ async function saveEditInvoice() {
     });
     const idx = cachedInvoices.findIndex(i => i.id === id);
     if (idx !== -1) cachedInvoices[idx] = { ...cachedInvoices[idx], ...updated[0] };
+    // حذف الصور المحذوفة من Cloudinary
+    for (const url of removedEditImages) {
+      try { await deleteFromCloudinary(url); } catch {}
+    }
+    removedEditImages = [];
     closeModal('edit-modal');
     renderInvoices();
     updateStats();
