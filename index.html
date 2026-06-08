@@ -1143,7 +1143,7 @@ async function saveInvoice() {
     const prog = document.getElementById('upload-progress');
     prog.style.display = 'block';
     for (let i = 0; i < editingImages.length; i++) {
-      prog.textContent = `☁️ جارٍ رفع الصورة ${i+1} من ${editingImages.length} إلى Cloudinary...`;
+      prog.textContent = `☁️ جارٍ رفع الصورة ${i+1} من ${editingImages.length}...`;
       try {
         const url = await uploadToCloudinary(editingImages[i]);
         imageUrls.push(url);
@@ -1154,7 +1154,7 @@ async function saveInvoice() {
     prog.style.display = 'none';
   }
 
-  showLoading('جارٍ حفظ الفاتورة في Supabase...');
+  showLoading('جارٍ حفظ الفاتورة...');
   try {
     const result = await sbPost('wms_invoices', {
       username: currentUser,
@@ -1530,7 +1530,7 @@ function showDetail(id) {
       ${ws ? dRow('📊 الحالة', `<span class="warranty-badge ${ws.badge}">${ws.icon} ${ws.label}</span>`) : ''}
       ${inv.notes ? dRow('📝 التفاصيل', escHtml(inv.notes)) : ''}
     </table>
-    ${inv.images?.length ? `<div style="margin-top:16px"><div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text2)">📷 صور الفاتورة <span class="cloud-badge">☁️ Cloudinary</span></div><div style="display:flex;flex-wrap:wrap;gap:8px">${imgsHtml}</div></div>` : ''}
+    ${inv.images?.length ? `<div style="margin-top:16px"><div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text2)">📷 صور الفاتورة</div><div style="display:flex;flex-wrap:wrap;gap:8px">${imgsHtml}</div></div>` : ''}
   `;
   openModal('detail-modal');
 }
