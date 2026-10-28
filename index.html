@@ -271,7 +271,7 @@ input, select, textarea, button { font-family: inherit; }
         <div id="hint-area" class="hint-show"></div>
         <a href="#" onclick="showHint();return false;" style="font-size:12px;color:var(--accent);text-decoration:none;margin-top:5px;display:inline-block;">💡 نسيت كلمة السر؟ اعرض التلميح</a>
       </div>
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:16px;cursor:pointer" onclick="document.getElementById('stay-logged').click()">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:16px;cursor:pointer" onclick="if(event.target.tagName!=='INPUT'&&event.target.tagName!=='LABEL'){document.getElementById('stay-logged').click()}">
         <input type="checkbox" id="stay-logged" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
         <label for="stay-logged" style="font-size:14px;font-weight:600;color:var(--text2);cursor:pointer;user-select:none">البقاء متصلاً</label>
       </div>
@@ -748,40 +748,61 @@ const SB_HDR = {
 };
 
 // ============================================================
-// SUPABASE HELPERS
+// RPC HELPERS — لا وصول مباشر لأي جدول
 // ============================================================
-async function sbGet(table, query = '') {
-  const res = await fetch(`${SB_URL}/rest/v1/${table}?${query}&select=*`, { headers: SB_HDR });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
-  return res.json();
+//  كل شيء يمر عبر دوال security definer (01_auth_rpc.sql + 12_wms_rpc.sql).
+//  هوية المستخدم تأتي من توكن الجلسة في القاعدة، ولم يعد المتصفح
+//  يرسل اسم المستخدم ولا يفلتر به — فلا يستطيع أحد قراءة بيانات غيره.
+// ============================================================
+const APP_ORIGIN = 'wms_invoices';   // نفس قيمة created_from في جدول users المشترك
+const TOKEN_KEY  = 'wms_token';
+
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || null; }
+  catch (e) { return null; }
 }
 
-async function sbPost(table, data) {
-  const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
-    method: 'POST',
-    headers: { ...SB_HDR, 'Prefer': 'return=representation' },
-    body: JSON.stringify(data)
-  });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
-  return res.json();
+/** remember=true يبقي الجلسة بعد إغلاق المتصفح، وإلا فهي لهذا التبويب فقط */
+function setToken(token, remember) {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    if (!token) return;
+    (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
+  } catch (e) {}
 }
 
-async function sbPatch(table, query, data) {
-  const res = await fetch(`${SB_URL}/rest/v1/${table}?${query}`, {
-    method: 'PATCH',
-    headers: { ...SB_HDR, 'Prefer': 'return=representation' },
-    body: JSON.stringify(data)
+/** استدعاء دالة في القاعدة. يرفع Error برسالة القاعدة نفسها (تظهر في toast). */
+async function rpc(fn, args = {}) {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers: SB_HDR, body: JSON.stringify(args)
   });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
-  return res.json();
+  const txt = await res.text();
+  let data = null;
+  try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
+  if (!res.ok) {
+    const msg = (data && (data.message || data.hint)) || txt || ('HTTP ' + res.status);
+    if (/unauthorized|28000|permission denied|JWT/i.test(msg)) { setToken(null); currentUser = null; }
+    throw new Error(msg);
+  }
+  return data;
 }
 
-async function sbDelete(table, query) {
-  const res = await fetch(`${SB_URL}/rest/v1/${table}?${query}`, {
-    method: 'DELETE', headers: SB_HDR
-  });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
-  return true;
+/** استدعاء يتطلب جلسة — التوكن وحده يحدد صاحب البيانات */
+function rpcAuth(fn, args = {}) {
+  const token = getToken();
+  if (!token) return Promise.reject(new Error('انتهت الجلسة — سجّل الدخول من جديد'));
+  return rpc(fn, Object.assign({ p_token: token }, args));
+}
+
+/** حذف صور من Cloudinary بقائمة روابط تعيدها دوال الحذف في القاعدة */
+async function deleteCloudImages(urls) {
+  let n = 0;
+  for (const url of (urls || [])) {
+    try { if (await deleteFromCloudinary(url)) n++; }
+    catch (e) { console.warn('Cloudinary:', e.message); }
+  }
+  return n;
 }
 
 // ============================================================
@@ -902,13 +923,16 @@ async function doLogin() {
   if (!u || !p) { toast('يرجى ملء جميع الحقول', 'error'); return; }
   showLoading('جارٍ تسجيل الدخول...');
   try {
-    const users = await sbGet('users', `user_id=eq.${encodeURIComponent(u)}`);
-    if (!users.length) { toast('اسم المستخدم غير موجود', 'error'); return; }
-    if (users[0].pass_hash !== btoa(p)) { toast('كلمة السر غير صحيحة', 'error'); return; }
-    currentUser = u;
-    if (document.getElementById('stay-logged').checked) {
-      localStorage.setItem('wms_session', u);
+    // المقارنة تتم داخل القاعدة ولا يُقرأ أي هاش هنا.
+    // الهاش القديم (btoa) يُرقّى إلى bcrypt تلقائياً عند أول دخول ناجح.
+    const res = await rpc('app_login', { p_user: u, p_pass: p, p_origin: APP_ORIGIN });
+    if (!res || res.ok !== true) {
+      if (res?.locked)           { toast('أُقفل الحساب مؤقتاً بعد محاولات فاشلة. انتظر ١٥ دقيقة', 'error'); return; }
+      if (res?.exists === false) { toast('اسم المستخدم غير موجود', 'error'); return; }
+      toast('كلمة السر غير صحيحة', 'error'); return;
     }
+    setToken(res.token, document.getElementById('stay-logged').checked);
+    currentUser = u;
     await enterApp();
   } catch (e) {
     toast('خطأ في الاتصال: ' + e.message, 'error');
@@ -920,9 +944,9 @@ async function showHint() {
   if (!u) { toast('أدخل اسم المستخدم أولاً', 'error'); return; }
   showLoading('جارٍ البحث...');
   try {
-    const users = await sbGet('users', `user_id=eq.${encodeURIComponent(u)}`);
-    if (!users.length) { toast('اسم المستخدم غير موجود', 'error'); return; }
-    const hint = users[0].hint || 'لا يوجد تلميح مسجل';
+    const res = await rpc('app_get_hint', { p_user: u });
+    if (!res?.exists) { toast('اسم المستخدم غير موجود', 'error'); return; }
+    const hint = res.hint || 'لا يوجد تلميح مسجل';
     const el = document.getElementById('hint-area');
     el.textContent = '💡 التلميح: ' + hint;
     el.style.display = 'block';
@@ -941,9 +965,11 @@ async function doRegister() {
   if (p !== p2) { toast('كلمة السر وتأكيدها غير متطابقين', 'error'); return; }
   showLoading('جارٍ إنشاء الحساب...');
   try {
-    const existing = await sbGet('users', `user_id=eq.${encodeURIComponent(u)}`);
-    if (existing.length) { toast('اسم المستخدم موجود بالفعل', 'error'); return; }
-    await sbPost('users', { user_id: u, pass_hash: btoa(p), hint, created_from: 'wms_invoices' });
+    // كلمة المرور تُهشَّر بـ bcrypt داخل القاعدة ولا تصل إلى الجدول كنص
+    const res = await rpc('app_signup', { p_user: u, p_pass: p, p_hint: hint || '', p_origin: APP_ORIGIN });
+    if (res?.taken) { toast('اسم المستخدم موجود بالفعل', 'error'); return; }
+    if (!res?.ok)   { toast('تعذّر إنشاء الحساب (' + (res?.error || 'غير معروف') + ')', 'error'); return; }
+    setToken(res.token, true);
     currentUser = u;
     toast('تم إنشاء الحساب بنجاح ✅', 'success');
     await enterApp();
@@ -955,21 +981,16 @@ async function doRegister() {
 async function enterApp() {
   showLoading('جارٍ تحميل البيانات...');
   try {
-    const u = encodeURIComponent(currentUser);
-    // حذف نهائي للعناصر التي مضى عليها أكثر من 30 يوم في السلة
-    const cutoff = new Date(Date.now() - 30*24*60*60*1000).toISOString();
-    const oldTrash = await sbGet('wms_invoices',
-      `username=eq.${u}&deleted_at=not.is.null&deleted_at=lt.${cutoff}`);
-    for (const inv of oldTrash) {
-      for (const img of (inv.images||[])) { try { await deleteFromCloudinary(img); } catch {} }
-      await sbDelete('wms_invoices', `id=eq.${inv.id}`);
-    }
-    // تحميل الفواتير النشطة
-    cachedInvoices = await sbGet('wms_invoices',
-      `username=eq.${u}&deleted_at=is.null&order=created_at.desc`);
-    // تحميل سلة المحذوفات
-    cachedTrash = await sbGet('wms_invoices',
-      `username=eq.${u}&deleted_at=not.is.null&order=deleted_at.desc`);
+    // الكنس التلقائي (٣٠ يوماً) تقرره القاعدة، وتعيد روابط الصور لمسحها من Cloudinary.
+    // لم تعد مدة القطع تأتي من المتصفح.
+    try {
+      const purged = await rpcAuth('bills_purge_old');
+      if (purged?.count) await deleteCloudImages(purged.images);
+    } catch (e) { console.warn('purge skipped:', e.message); }
+
+    // القاعدة تفلتر بالمستخدم المستخرج من التوكن
+    cachedInvoices = await rpcAuth('bills_fetch', { p_trash: false });
+    cachedTrash    = await rpcAuth('bills_fetch', { p_trash: true  });
 
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('app-screen').style.display = 'block';
@@ -986,7 +1007,10 @@ async function enterApp() {
 
 function doLogout() {
   if (!confirm('هل تريد تسجيل الخروج؟')) return;
-  localStorage.removeItem('wms_session');
+  const t = getToken();
+  if (t) rpc('app_logout', { p_token: t }).catch(() => {});   // إبطال التوكن في القاعدة
+  setToken(null);
+  localStorage.removeItem('wms_session');   // مفتاح النسخة القديمة
   currentUser = null;
   isGuest = false;
   cachedInvoices = [];
@@ -1001,9 +1025,14 @@ function doLogout() {
   document.getElementById('app-screen').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
   resetForm();
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
+  // تفريغ كل الحقول والقوائم حتى لا يبقى أثر للحساب السابق على الشاشة
+  ['login-user','login-pass','reg-user','reg-pass','reg-pass2','reg-hint',
+   'cp-old','cp-new','cp-new2','cp-hint','search-input']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('hint-area').style.display = 'none';
+  renderInvoices();
+  renderTrash();
+  updateStats();
 }
 
 // ============================================================
@@ -1032,13 +1061,12 @@ async function changePassword() {
   if (np !== np2) { toast('كلمة السر الجديدة وتأكيدها غير متطابقين', 'error'); return; }
   showLoading('جارٍ تغيير كلمة السر...');
   try {
-    const users = await sbGet('users', `user_id=eq.${encodeURIComponent(currentUser)}`);
-    if (!users.length || users[0].pass_hash !== btoa(old)) {
-      toast('كلمة السر الحالية غير صحيحة', 'error'); return;
+    const res = await rpcAuth('app_change_password', { p_old: old, p_new: np });
+    if (!res?.ok) {
+      if (res?.error === 'wrong_old_password') { toast('كلمة السر الحالية غير صحيحة', 'error'); return; }
+      toast('تعذّر التغيير (' + (res?.error || 'غير معروف') + ')', 'error'); return;
     }
-    const upd = { pass_hash: btoa(np) };
-    if (nh) upd.hint = nh;
-    await sbPatch('users', `user_id=eq.${encodeURIComponent(currentUser)}`, upd);
+    if (nh) { try { await rpcAuth('bills_set_hint', { p_hint: nh }); } catch (e) {} }
     closeModal('settings-modal');
     toast('تم تغيير كلمة السر بنجاح ✅', 'success');
   } catch (e) {
@@ -1128,14 +1156,7 @@ async function saveInvoice() {
     if (!go) { document.getElementById('f-amount').focus(); return; }
   }
 
-  let expiry_date = null;
-  if (wy > 0 || wm > 0 || wd > 0) {
-    const d = new Date(date);
-    d.setFullYear(d.getFullYear() + wy);
-    d.setMonth(d.getMonth() + wm);
-    d.setDate(d.getDate() + wd);
-    expiry_date = d.toISOString().split('T')[0];
-  }
+  // expiry_date لم يعد يُحسب هنا — القاعدة تحسبه من التاريخ ومدة الضمان
 
   // Upload images to Cloudinary
   const imageUrls = [];
@@ -1143,7 +1164,7 @@ async function saveInvoice() {
     const prog = document.getElementById('upload-progress');
     prog.style.display = 'block';
     for (let i = 0; i < editingImages.length; i++) {
-      prog.textContent = `☁️ جارٍ رفع الصورة ${i+1} من ${editingImages.length} إلى Cloudinary...`;
+      prog.textContent = `☁️ جارٍ رفع الصورة ${i+1} من ${editingImages.length}...`;
       try {
         const url = await uploadToCloudinary(editingImages[i]);
         imageUrls.push(url);
@@ -1154,18 +1175,17 @@ async function saveInvoice() {
     prog.style.display = 'none';
   }
 
-  showLoading('جارٍ حفظ الفاتورة في Supabase...');
+  showLoading('جارٍ حفظ الفاتورة...');
   try {
-    const result = await sbPost('wms_invoices', {
-      username: currentUser,
+    // username لم يعد يُرسل: القاعدة تستخرجه من التوكن وتتجاهل أي قيمة هنا
+    const result = await rpcAuth('bills_add', { p_item: {
       date, supplier, amount, notes,
-      expiry_date,
       warranty_years: wy,
       warranty_months: wm,
       warranty_days: wd,
       images: imageUrls
-    });
-    cachedInvoices.unshift(result[0]);
+    }});
+    cachedInvoices.unshift(result.row);
     resetForm();
     renderInvoices();
     updateStats();
@@ -1295,7 +1315,7 @@ async function sha1(str) {
 
 async function deleteFromCloudinary(imageUrl) {
   const publicId = extractPublicId(imageUrl);
-  if (!publicId) return;
+  if (!publicId) { console.warn('Cloudinary: تعذّر استخراج public_id من', imageUrl); return false; }
   const timestamp = Math.round(Date.now() / 1000);
   const sigStr = `public_id=${publicId}&timestamp=${timestamp}${CL_SECRET}`;
   const signature = await sha1(sigStr);
@@ -1304,9 +1324,14 @@ async function deleteFromCloudinary(imageUrl) {
   fd.append('api_key', CL_KEY);
   fd.append('timestamp', timestamp);
   fd.append('signature', signature);
-  await fetch(`https://api.cloudinary.com/v1_1/${CL_CLOUD}/image/destroy`, {
+  const r = await fetch(`https://api.cloudinary.com/v1_1/${CL_CLOUD}/image/destroy`, {
     method: 'POST', body: fd
   });
+  let out = null;
+  try { out = await r.json(); } catch (e) {}
+  const ok = !!out && out.result === 'ok';
+  if (!ok) console.warn('Cloudinary destroy لم ينجح:', publicId, out);
+  return ok;
 }
 
 // ============================================================
@@ -1319,8 +1344,8 @@ async function deleteInvoice(id) {
   if (!go) return;
   showLoading('جارٍ النقل للسلة...');
   try {
+    await rpcAuth('bills_soft_delete', { p_ids: [id] });
     const now = new Date().toISOString();
-    await sbPatch('wms_invoices', `id=eq.${id}`, { deleted_at: now });
     const inv = cachedInvoices.find(i => i.id === id);
     if (inv) { inv.deleted_at = now; cachedTrash.unshift(inv); }
     cachedInvoices = cachedInvoices.filter(i => i.id !== id);
@@ -1345,10 +1370,10 @@ async function deleteSelected() {
   if (!go) return;
   showLoading('جارٍ النقل للسلة...');
   try {
-    const now = new Date().toISOString();
     const ids = [...selectedIds];
+    await rpcAuth('bills_soft_delete', { p_ids: ids });   // دفعة واحدة بدل طلب لكل فاتورة
+    const now = new Date().toISOString();
     for (const id of ids) {
-      await sbPatch('wms_invoices', `id=eq.${id}`, { deleted_at: now });
       const inv = cachedInvoices.find(i => i.id === id);
       if (inv) { inv.deleted_at = now; cachedTrash.unshift(inv); }
     }
@@ -1368,7 +1393,7 @@ async function deleteSelected() {
 async function restoreInvoice(id) {
   showLoading('جارٍ الاستعادة...');
   try {
-    await sbPatch('wms_invoices', `id=eq.${id}`, { deleted_at: null });
+    await rpcAuth('bills_restore', { p_ids: [id] });
     const inv = cachedTrash.find(i => i.id === id);
     if (inv) { inv.deleted_at = null; cachedInvoices.unshift(inv); }
     cachedTrash = cachedTrash.filter(i => i.id !== id);
@@ -1385,19 +1410,20 @@ async function restoreInvoice(id) {
 async function permanentDeleteInvoice(id) {
   const go = await confirmDialog('⚠️ حذف نهائي', 'سيتم حذف الفاتورة والصور نهائياً ولا يمكن التراجع.', 'حذف نهائي', 'إلغاء');
   if (!go) return;
-  const inv = cachedTrash.find(i => i.id === id);
   showLoading('جارٍ الحذف النهائي...');
   try {
-    if (inv?.images?.length) {
-      for (let i = 0; i < inv.images.length; i++) {
-        document.querySelector('#loading-overlay p').textContent = `حذف الصورة ${i+1}/${inv.images.length}...`;
-        try { await deleteFromCloudinary(inv.images[i]); } catch {}
-      }
+    // القاعدة تحذف الصف (من السلة فقط) وتعيد روابط صوره لتُمسح من Cloudinary
+    const res  = await rpcAuth('bills_hard_delete', { p_ids: [id] });
+    const imgs = res?.images || [];
+    let done = 0;
+    for (let i = 0; i < imgs.length; i++) {
+      document.querySelector('#loading-overlay p').textContent = `حذف الصورة ${i+1}/${imgs.length}...`;
+      try { if (await deleteFromCloudinary(imgs[i])) done++; } catch (e) {}
     }
-    await sbDelete('wms_invoices', `id=eq.${id}`);
     cachedTrash = cachedTrash.filter(i => i.id !== id);
     renderTrash();
-    toast('تم الحذف النهائي 🔥', 'info');
+    toast(imgs.length ? `تم الحذف النهائي 🔥 (${done}/${imgs.length} صورة)` : 'تم الحذف النهائي 🔥',
+          done < imgs.length ? 'error' : 'info');
   } catch (e) {
     toast('خطأ: ' + e.message, 'error');
   } finally { hideLoading(); }
@@ -1410,15 +1436,13 @@ async function emptyTrash() {
   if (!go) return;
   showLoading('جارٍ إفراغ السلة...');
   try {
-    for (const inv of [...cachedTrash]) {
-      if (inv?.images?.length) {
-        for (const img of inv.images) { try { await deleteFromCloudinary(img); } catch {} }
-      }
-      await sbDelete('wms_invoices', `id=eq.${inv.id}`);
-    }
+    const res  = await rpcAuth('bills_empty_trash');
+    const imgs = res?.images || [];
+    const done = await deleteCloudImages(imgs);
     cachedTrash = [];
     renderTrash();
-    toast('تم إفراغ السلة نهائياً 🔥', 'info');
+    toast(imgs.length ? `تم إفراغ السلة نهائياً 🔥 (${done}/${imgs.length} صورة)` : 'تم إفراغ السلة نهائياً 🔥',
+          done < imgs.length ? 'error' : 'info');
   } catch (e) {
     toast('خطأ: ' + e.message, 'error');
   } finally { hideLoading(); }
@@ -1530,7 +1554,7 @@ function showDetail(id) {
       ${ws ? dRow('📊 الحالة', `<span class="warranty-badge ${ws.badge}">${ws.icon} ${ws.label}</span>`) : ''}
       ${inv.notes ? dRow('📝 التفاصيل', escHtml(inv.notes)) : ''}
     </table>
-    ${inv.images?.length ? `<div style="margin-top:16px"><div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text2)">📷 صور الفاتورة <span class="cloud-badge">☁️ Cloudinary</span></div><div style="display:flex;flex-wrap:wrap;gap:8px">${imgsHtml}</div></div>` : ''}
+    ${inv.images?.length ? `<div style="margin-top:16px"><div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text2)">📷 صور الفاتورة</div><div style="display:flex;flex-wrap:wrap;gap:8px">${imgsHtml}</div></div>` : ''}
   `;
   openModal('detail-modal');
 }
@@ -1942,14 +1966,7 @@ async function saveEditInvoice() {
   if (!date)     { toast('يرجى تحديد تاريخ الشراء', 'error'); return; }
   if (!supplier) { toast('يرجى إدخال اسم المورد', 'error'); return; }
 
-  let expiry_date = null;
-  if (wy > 0 || wm > 0 || wd > 0) {
-    const d = new Date(date);
-    d.setFullYear(d.getFullYear() + wy);
-    d.setMonth(d.getMonth() + wm);
-    d.setDate(d.getDate() + wd);
-    expiry_date = d.toISOString().split('T')[0];
-  }
+  // expiry_date لم يعد يُحسب هنا — القاعدة تحسبه من التاريخ ومدة الضمان
 
   // Upload new images
   const allImages = [...editExistingImages];
@@ -1970,13 +1987,14 @@ async function saveEditInvoice() {
 
   showLoading('جارٍ حفظ التعديلات...');
   try {
-    const updated = await sbPatch('wms_invoices', `id=eq.${id}`, {
-      date, supplier, amount, notes, expiry_date,
+    // القاعدة ترفض التعديل إن لم يكن الصف ملكاً لصاحب التوكن
+    const updated = await rpcAuth('bills_update', { p_id: String(id), p_item: {
+      date, supplier, amount, notes,
       warranty_years: wy, warranty_months: wm, warranty_days: wd,
       images: allImages
-    });
+    }});
     const idx = cachedInvoices.findIndex(i => i.id === id);
-    if (idx !== -1) cachedInvoices[idx] = { ...cachedInvoices[idx], ...updated[0] };
+    if (idx !== -1) cachedInvoices[idx] = updated.row;
     // حذف الصور المحذوفة من Cloudinary
     for (const url of removedEditImages) {
       try { await deleteFromCloudinary(url); } catch {}
@@ -2012,11 +2030,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (camStream) camStream.getTracks().forEach(t => t.stop());
   });
 
-  // Auto-login if session saved
-  const saved = localStorage.getItem('wms_session');
-  if (saved) {
-    currentUser = saved;
-    await enterApp();
+  // استئناف الجلسة: القاعدة وحدها تقرر صلاحية التوكن
+  // (لم يعد اسم المستخدم يُقرأ من التخزين المحلي، فلا يمكن انتحاله بتحريره)
+  const token = getToken();
+  if (token) {
+    try {
+      const u = await rpc('app_session_user', { p_token: token });
+      if (u) { currentUser = u; await enterApp(); }
+      else   { setToken(null); }
+    } catch (e) { setToken(null); console.warn('session check failed:', e.message); }
   }
 });
 </script>
